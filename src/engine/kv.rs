@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::{fs, io};
-use std::fs::{File, OpenOptions, remove_file};
+use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use crate::errors::{KvsError,Result};
 
 
-use crate::command::Command;
+use crate::engine::command::Command;
+use crate::engine::KvsEngine;
 
 const COMPACT_THRESHOLD:u64=1024;
 
@@ -27,7 +28,7 @@ pub struct KvStore {
 }
 
 impl KvStore {
-    pub fn open(path:impl Into<PathBuf>)->Result<KvStore>{
+    pub fn open(path:impl Into<PathBuf>)->Result<Self>{
         let dir_path=path.into();
         // create dir if not exist
         fs::create_dir_all(&dir_path)?;
@@ -70,78 +71,6 @@ impl KvStore {
         }
 
         Ok(store)
-    }
-
-    pub fn set(&mut self,key:String,value:String)->Result<()>{
-        let command=Command::SET(key,value);
-        let ser_command=serde_json::to_vec(&command)?;
-
-        let offset=self.writer.position;
-
-        // write command into writer buffer
-        self.writer.write(&ser_command)?;
-        self.writer.flush()?;
-
-        let command_length=self.writer.position-offset;
-
-        if let Command::SET(key, _) = command {
-            // closure use
-            self.uncompacted+=self.index.insert(key,CommandPos{
-                file_id: self.current_file_id,
-                offset,
-                length: command_length,
-            }).map(|command_pos|command_pos.length).unwrap_or(0);
-        }
-
-        // if current uncompacted data size is bigger than COMPACT_THRESHOLD,
-        // then we should start compact operation
-        if self.uncompacted>COMPACT_THRESHOLD {
-            self.compact()?
-        }
-        Ok(())
-    }
-
-    pub fn get(&mut self,key:String)->Result<Option<String>>{
-        if let Some(command_pos) = self.index.get(&key) {
-            // get mut reader
-            let reader=self.readers.get_mut(&command_pos.file_id)
-                .expect("get reader error");
-            reader.seek(SeekFrom::Start(command_pos.offset))?;
-            let data_reader=reader.take(command_pos.length as u64);
-            if let Command::SET(_,value) = serde_json::from_reader(data_reader)? {
-                Ok(Some(value))
-            }else {
-                Err(KvsError::UnexpectedCommandType)
-            }
-        }else {
-            Ok(None)
-        }
-    }
-
-    pub fn remove(&mut self, key:String)->Result<()>{
-        if self.index.contains_key(&key) {
-            // it should be removed when memory map has 'SET' command,
-            // so we should also remove this command when compact
-            self.uncompacted+=self.index.remove(&key).map(|command_pos|command_pos.length).unwrap_or(0);
-            let command=Command::REMOVE(key);
-            let ser_command=serde_json::to_vec(&command)?;
-
-            let offset=self.writer.position;
-
-            self.writer.write(&ser_command)?;
-            self.writer.flush()?;
-
-            let command_length=self.writer.position-offset;
-            self.uncompacted+=command_length;
-
-            if self.uncompacted>COMPACT_THRESHOLD {
-                self.compact()?;
-            }
-
-            Ok(())
-        }else {
-            Err(KvsError::KeyNotFound)
-        }
     }
 
     // restore kv store from file
@@ -193,7 +122,6 @@ impl KvStore {
         self.uncompacted=0;
         Ok(())
     }
-
 
     // create new log file
     fn new_file(&mut self)->Result<()>{
@@ -269,6 +197,82 @@ impl KvStore {
         Ok((*file_list.last().unwrap_or(&0), uncompacted))
     }
 }
+
+impl KvsEngine for KvStore {
+
+    fn set(&mut self,key:String,value:String)->Result<()>{
+        let command=Command::SET(key,value);
+        let ser_command=serde_json::to_vec(&command)?;
+
+        let offset=self.writer.position;
+
+        // write command into writer buffer
+        self.writer.write(&ser_command)?;
+        self.writer.flush()?;
+
+        let command_length=self.writer.position-offset;
+
+        if let Command::SET(key, _) = command {
+            // closure use
+            self.uncompacted+=self.index.insert(key,CommandPos{
+                file_id: self.current_file_id,
+                offset,
+                length: command_length,
+            }).map(|command_pos|command_pos.length).unwrap_or(0);
+        }
+
+        // if current uncompacted data size is bigger than COMPACT_THRESHOLD,
+        // then we should start compact operation
+        if self.uncompacted>COMPACT_THRESHOLD {
+            self.compact()?
+        }
+        Ok(())
+    }
+
+    fn get(&mut self,key:String)->Result<Option<String>>{
+        if let Some(command_pos) = self.index.get(&key) {
+            // get mut reader
+            let reader=self.readers.get_mut(&command_pos.file_id)
+                .expect("get reader error");
+            reader.seek(SeekFrom::Start(command_pos.offset))?;
+            let data_reader=reader.take(command_pos.length);
+            if let Command::SET(_,value) = serde_json::from_reader(data_reader)? {
+                Ok(Some(value))
+            }else {
+                Err(KvsError::UnexpectedCommandType)
+            }
+        }else {
+            Ok(None)
+        }
+    }
+
+    fn remove(&mut self, key:String)->Result<()>{
+        if self.index.contains_key(&key) {
+            // it should be removed when memory map has 'SET' command,
+            // so we should also remove this command when compact
+            self.uncompacted+=self.index.remove(&key).map(|command_pos|command_pos.length).unwrap_or(0);
+            let command=Command::REMOVE(key);
+            let ser_command=serde_json::to_vec(&command)?;
+
+            let offset=self.writer.position;
+
+            self.writer.write(&ser_command)?;
+            self.writer.flush()?;
+
+            let command_length=self.writer.position-offset;
+            self.uncompacted+=command_length;
+
+            if self.uncompacted>COMPACT_THRESHOLD {
+                self.compact()?;
+            }
+
+            Ok(())
+        }else {
+            Err(KvsError::KeyNotFound)
+        }
+    }
+}
+
 
 struct BufReaderWithPos<R:Read+Seek>{
     position:u64,
