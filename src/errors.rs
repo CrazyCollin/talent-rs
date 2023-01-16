@@ -1,6 +1,5 @@
 use std::string::FromUtf8Error;
 use std::{io, result};
-use failure::Fail;
 use serde_json;
 use sled;
 use thiserror::Error;
@@ -21,6 +20,9 @@ pub enum KvsError{
 
     #[error("{0}")]
     FromUTF8Err(#[from]FromUtf8Error),
+    
+    #[error("{0}")]
+    ThreadPoolBuilderError(#[from]rayon::ThreadPoolBuildError),
 
     #[error("{0}")]
     StrErr(String),
