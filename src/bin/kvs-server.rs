@@ -15,25 +15,16 @@ fn main()->Result<()>{
     let matches=App::new(format!("kvs-server"))
         .version(env!("CARGO_PKG_VERSION"))
         .arg(
-            // Arg::with_name("--addr")
-            //     .help("ip:port address")
-            //     .required(false)
-            //     .default_value(DEFAULT_SERVER_ADDRESS)
-                arg!(--addr <IPPORT>)
+            arg!(--addr <IPPORT>)
                 .required(false)
                 .default_value(DEFAULT_SERVER_ADDRESS)
         )
         .arg(
-            // Arg::with_name("--engine")
-            //     .help("chose kv engine")
-            //     .required(false)
-            //     .default_value(EngineType::default_type().to_string().as_str())
             arg!(--engine <ENGINENAME>)
                 .required(false)
                 .value_parser(["kvs", "sled"]),
         )
         .get_matches();
-    // let address=matches.value_of("addr").unwrap().to_string();
     let address=matches.get_one::<String>("addr").cloned().unwrap();
     let engine_type;
     match convert(matches.get_one::<String>("engine").cloned()) {
@@ -47,7 +38,7 @@ fn main()->Result<()>{
     Ok(())
 }
 
-//
+// convert string into spec type
 fn convert(engine:Option<String>)->Result<EngineType>{
     let dir_path=env::current_dir()?;
     match engine {
@@ -72,43 +63,6 @@ fn convert(engine:Option<String>)->Result<EngineType>{
         }
     }
 
-    // match engine {
-    //     //
-    //     Some(v)=>{
-    //         // let engine_type=e.to_string();
-    //         // let s1=String::from("kvs");
-    //         // match e {
-    //         //     s1=>{
-    //                 if dir_path.join("sled").exists() {
-    //                     return Err(KvsError::EngineErr);
-    //                 }
-    //                 Ok(EngineType::default_type())
-    //         //     },
-    //         //     "sled"=>{
-    //         //         if dir_path.join("kvs").exists() {
-    //         //             return Err(KvsError::EngineErr);
-    //         //         }
-    //         //         Ok(EngineType::Sled)
-    //         //     },
-    //         //     _ => Ok(EngineType::default_type())
-    //         //
-    //         // }
-    //         if v==String::from("sled"){
-    //             if dir_path.join("sled").exists() {
-    //                 return Err(KvsError::EngineErr);
-    //             }
-    //             Ok(EngineType::default_type())
-    //         }
-    //
-    //     }
-    //     None=>{
-    //         if dir_path.join(EngineType::to_string(&EngineType::Sled)).exists() {
-    //             return Ok(EngineType::Sled);
-    //         }
-    //         Ok(EngineType::Default)
-    //     }
-    //
-    // }
 }
 
 // start kv engine for kvs server use
